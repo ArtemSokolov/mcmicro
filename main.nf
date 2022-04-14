@@ -53,6 +53,10 @@ if( params.probabilityMaps == 'all' )
     error "--probability-maps all is deprecated; please be explicit, e.g., --probability-maps unmicst,ilastik"
 if( params.nstatesOpts != '' )
     error "--nstatesOpts is deprecated; please use --naivestatesOpts"
+if( params.startAt == 'cell-states' )
+    error "--start-at cell-states is deprecated; please use --start-at downstream"
+if( params.stopAt == 'cell-states' )
+    error "--stop-at cell-states is deprecated; please use --stop-at downstream"
 
 // Steps in the mcmicro pipeline
 mcmsteps = ["raw",		// Step 0
@@ -62,11 +66,16 @@ mcmsteps = ["raw",		// Step 0
 	    "probability-maps", // Step 4
 	    "segmentation",	// Step 5
 	    "quantification",	// Step 6
-	    "cell-states"]      // Step 7
+	    "downstream"]      // Step 7
 
 // Identify starting and stopping index
 idxStart = mcmsteps.indexOf( params.startAt )
 idxStop  = mcmsteps.indexOf( params.stopAt )
+
+// Automatically adjust the stopping step if starting past quantification
+if( idxStart == 7 ) idxStop = 7
+
+// Verify consistency
 if( idxStart < 0 )       error "Unknown starting step ${params.startAt}"
 if( idxStop < 0 )        error "Unknown stopping step ${params.stopAt}"
 if( idxStop < idxStart ) error "Stopping step cannot come before starting step"
