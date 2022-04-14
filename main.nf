@@ -72,7 +72,7 @@ mcmsteps = ["raw",		// Step 0
 idxStart = mcmsteps.indexOf( params.startAt )
 idxStop  = mcmsteps.indexOf( params.stopAt )
 
-// Automatically adjust the stopping step if starting past quantification
+// Automatically adjust the stopping step as appropriate
 if( idxStart == 7 ) idxStop = 7
 
 // Verify consistency
@@ -162,6 +162,7 @@ include {dearray}        from './modules/dearray'          addParams(pubDir: pat
 include {segmentation}   from './modules/segmentation'
 include {quantification} from './modules/quantification'   addParams(pubDir: paths[6])
 include {cellstates}     from './modules/cell-states'      addParams(pubDir: paths[7])
+include {pixel}          from './modules/pixel'
 include {roadie}         from './modules/roadie/roadie'
 
 // Define the primary mcmicro workflow
@@ -199,8 +200,14 @@ workflow {
     sft = quantification.out.mix(pre_qty)
     cellstates(sft, modCS)
 
+<<<<<<< HEAD
     // Run miscellaneous tasks
     roadie(allimg)
+=======
+    // Cell cutting and pixel-level analyses
+    pixel(params.moduleCutter, allimg, segMsk, sft)
+        .view()
+>>>>>>> de99608 (Isolate the cell mask)
 }
 
 // Write out parameters used
