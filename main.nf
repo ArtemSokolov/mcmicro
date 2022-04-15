@@ -200,14 +200,12 @@ workflow {
     sft = quantification.out.mix(pre_qty)
     cellstates(sft, modCS)
 
-<<<<<<< HEAD
-    // Run miscellaneous tasks
-    roadie(allimg)
-=======
     // Cell cutting and pixel-level analyses
     pixel(params.moduleCutter, allimg, segMsk, sft)
         .view()
->>>>>>> de99608 (Isolate the cell mask)
+    
+    // Run miscellaneous tasks
+    roadie(allimg)
 }
 
 // Write out parameters used
