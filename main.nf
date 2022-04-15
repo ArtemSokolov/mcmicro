@@ -31,7 +31,7 @@ params.singleFormats = '{.ome.tiff,.ome.tif,.rcpnl,.btf,.nd2,.tif,.czi}'
 
 // Default selection of methods for each step
 params.probabilityMaps = 'unmicst'
-params.cellStates      = 'scimap'
+params.cellStates      = ''
 
 // Legacy parameters (to be deprecated in future versions)
 params.illum              = false
@@ -135,7 +135,7 @@ pre_pmap = findFiles(idxStart == 5,
 		     {error "No probability maps found in ${paths[4]}"})
     .map{ f -> tuple(f.getParent().getName(), f) }
     .filter{ params.probabilityMaps.contains(it[0]) }
-pre_segMsk = findFiles(idxStart == 6,
+pre_segMsk = findFiles(idxStart >= 6,
 		       "${paths[5]}/**.tif",
 		       {error "No segmentation masks in ${paths[5]}"})
     .map{ f -> tuple(f.getParent().getName(), f) }.groupTuple()

@@ -12,20 +12,26 @@ workflow pixel {
     // Determine IDs of images
     id_imgs = imgs.map{ f -> tuple(getImageID(f), f) }
 
-    // Isolate cell masks and determine their IDs
-    id_msks = segmasks.map{ id, msk -> 
-        x = id.split('-',2);
+    // Isolate spatial feature tables (SFTs) corresponding to the cell masks
+    //  and extract the corresponding IDs
+    id_sfts = sfts.filter{
+        it.getName().toString().indexOf('_cell.csv') > -1
+    }.map{
+        f -> tuple(getFileID(f,'_cell'), f)
+    }
+
+    // Isolate cell masks and match them up against SFTs and images
+    inputs = segmasks.map{ id, msk ->
         cellmsk = msk.find{ 
             it.getSimpleName().toString().indexOf('cell') > -1 
         }
-        tuple(x[1], x[0], cellmsk) 
-    }
-
-    // Isolate spatial feature tables corresponding to the cell masks
-    sfts.filter{
-        it.getName().toString().indexOf('_cell.csv') > -1
-    }
+        tuple(id, cellmsk)
+    }.combine(id_sfts, by:0)
+        .map{ id, msk, sft ->
+        x = id.split('-',2); tuple(x[1], id, msk, sft)
+    }.combine(id_imgs, by:0)
+        .map{ id, tag, msk, sft, img -> tuple(tag, img, msk, sft)}
 
     emit:
-        sfts
+        inputs
 }
