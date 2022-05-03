@@ -2,7 +2,7 @@ process cellcutter {
     container "${params.contPfx}${module.container}:${module.version}"
 
     // Output
-    publishDir "${params.in}/cells/${tag}", mode: 'copy', pattern: '*.zip'
+    publishDir "${params.in}/cells", mode: 'copy', pattern: '*.zip'
 
     // Provenance
     publishDir "${params.path_prov}", mode: 'copy', pattern: '.command.sh',
@@ -18,7 +18,7 @@ process cellcutter {
         tuple val(tag), path("*.zip"), emit: cells
 
     """
-    cut_cells -z ${params.cutterOpts} $img $msk $sft .
+    cut_cells -z ${params.cutterOpts} $img $msk $sft $tag
     """
 }
 

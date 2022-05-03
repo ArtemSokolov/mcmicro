@@ -18,6 +18,7 @@ params.stopAt      = 'quantification'
 params.qcFiles     = 'copy'   // what to do with qc/ files when publishing them
 params.tma         = false    // whether working with a TMA (true) or whole-slide image (false)
 params.dynrange    = false    // misc: autothresholding of channels
+params.cutCells    = false    // whether to run the cellcutter
 
 // Some image formats store multiple fields of view in a single file. Other
 // formats store each field separately, typically in .tif files, with a separate
@@ -202,7 +203,6 @@ workflow {
 
     // Cell cutting and pixel-level analyses
     pixel(params.moduleCutter, allimg, segMsk, sft)
-        .view()
     
     // Run miscellaneous tasks
     roadie(allimg)
