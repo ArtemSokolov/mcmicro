@@ -1,0 +1,47 @@
+illumination:
+  modules: BaSiC
+  inputs:
+    - raw
+registration:
+  modules: 
+    - ASHLAR
+    - palom
+  inputs:
+    - raw
+    - optional: illumination
+background:
+  modules:
+    - backsub
+  inputs:
+    - registration
+dearray:
+  modules: coreograph
+  inputs:
+    - registration
+segmentation:
+  modules: 
+    - [unmicst, s3segmenter]
+    - [ilastik, s3segmenter]
+    - mesmer
+    - cellpose
+  inputs:
+    - xor: [registration, dearray]
+quantification:
+  modules:
+    - mcquant
+  inputs:
+    - xor: [registration, background, dearray]
+    - segmentation
+downstream:
+  modules:
+    - scimap
+    - scanpy
+    - fastpg
+    - flowsom
+    - naivestates
+  inputs:
+    - quantification
+viz:
+  modules: auto-minerva
+  inputs:
+    - registration
