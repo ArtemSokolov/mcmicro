@@ -236,19 +236,29 @@ Expected differences:
 Each phase picks its cases from this list. `P` is the project directory of
 the run.
 
+**Segmentation uses ilastik, not UnMicst.** Every case that runs
+segmentation or watershed, or starts after them, passes
+`--segmentation ilastik` (or a list that contains `ilastik` in place of
+`unmicst`), overriding the default `segmentation: unmicst`. Keep the flag on
+every run of a multi-run case: `main.nf` only picks up precomputed
+probability maps for the methods listed in `--segmentation` (`main.nf:110`),
+so a later `--start-at watershed` run without it would find no maps. New
+cases follow the same rule. Cases that stop at or before registration, or fail
+before any task runs, don't need it.
+
 | ID | Data | Command | Exercises |
 |---|---|---|---|
-| **E1-default** | E1 | `--in P` | default flow: ashlar → unmicst (`worker`) → s3seg → mcquant; background, dearray and viz are skipped |
+| **E1-default** | E1 | `--in P --segmentation ilastik` | default flow with ilastik: ashlar → ilastik (`worker`) → s3seg → mcquant; background, dearray and viz are skipped |
 | **E1-illum** | E1, without `illumination/` | `--in P --start-at illumination --stop-at registration` | `illumination.nf`, profile channels in `main.nf`, joins in `registration.nf` |
-| **E1-steps** | E1 + seed `registration/` | in one project dir, in order: `--start-at segmentation --stop-at segmentation`, `--start-at watershed --stop-at watershed`, `--start-at quantification --stop-at quantification` (from `ci.yml`) | discovering precomputed intermediates (`findFiles*`, `pre_*` channels) and `--start-at` / `--stop-at` gating |
-| **E1-seg-multi** | E1 + seed `registration/` | `--in P --start-at segmentation --segmentation unmicst,cellpose` | both segmentation branches: probability maps → s3seg and instance segmentation (`watershed: no`) |
-| **E1-recyze** | E1 + seed `registration/` | `--in P --start-at segmentation --stop-at segmentation --segmentation-recyze --segmentation-channel 1` | `include` of `roadie`, `roadie.nf` `runTask` |
-| **E1-downstream** | E1 + seed `quantification/` | `--in P --start-at downstream --stop-at downstream --downstream scimap` | `downstream.nf`, `worker` from downstream |
+| **E1-steps** | E1 + seed `registration/` | in one project dir, in order: `--start-at segmentation --stop-at segmentation`, `--start-at watershed --stop-at watershed`, `--start-at quantification --stop-at quantification`, each with `--segmentation ilastik` (the `ci.yml` step-by-step runs, plus the flag) | discovering precomputed intermediates (`findFiles*`, `pre_*` channels) and `--start-at` / `--stop-at` gating |
+| **E1-seg-multi** | E1 + seed `registration/` | `--in P --start-at segmentation --segmentation ilastik,cellpose` | both segmentation branches: probability maps → s3seg and instance segmentation (`watershed: no`) |
+| **E1-recyze** | E1 + seed `registration/` | `--in P --start-at segmentation --stop-at segmentation --segmentation ilastik --segmentation-recyze --segmentation-channel 1` | `include` of `roadie`, `roadie.nf` `runTask` |
+| **E1-downstream** | E1 + seed `quantification/` | `--in P --start-at downstream --stop-at downstream --segmentation ilastik --downstream scimap` | `downstream.nf`, `worker` from downstream |
 | **E1-viz** | E1 | `--in P --stop-at registration --viz` | `viz.nf` (autominerva) |
-| **E2-dearray** | E2 + seed `e2-registration/` + `markers.csv`, `params.yml` | `--in P --start-at dearray --stop-at watershed` | coreograph, `pre_img` for TMA, TMA mask joins in `segmentation.nf`, s3seg `--crop dearray` |
-| **AF-backsub** | AF | `--in P --background` (from `ci.yml`) | `background.nf` (backsub, `GStringTemplateEngine` command), the background branches of `img` and `chMrk` in `main.nf`, and `markers_bs.csv` reaching quantification |
-| **AF-rollingball** | AF | `--in P --background --background-method imagej-rolling-ball --stop-at background` (from `ci.yml`) | the second background module, and module selection by `--background-method` in `Opts.parseParams` |
-| **AF-bs-pre** | AF + seed `registration/`, `background/` | `--in P --background --start-at segmentation` | precomputed `pre_bsub` / `pre_bsubm` |
+| **E2-dearray** | E2 + seed `e2-registration/` + `markers.csv`, `params.yml` | `--in P --start-at dearray --stop-at watershed --segmentation ilastik` | coreograph, `pre_img` for TMA, TMA mask joins in `segmentation.nf`, s3seg `--crop dearray` |
+| **AF-backsub** | AF | `--in P --background --segmentation ilastik` (the `ci.yml` `--background` run, plus the flag) | `background.nf` (backsub, `GStringTemplateEngine` command), the background branches of `img` and `chMrk` in `main.nf`, and `markers_bs.csv` reaching quantification |
+| **AF-rollingball** | AF | `--in P --background --background-method imagej-rolling-ball --stop-at background` (the `ci.yml` rolling-ball run, stopped after background) | the second background module, and module selection by `--background-method` in `Opts.parseParams` |
+| **AF-bs-pre** | AF + seed `registration/`, `background/` | `--in P --background --start-at segmentation --segmentation ilastik` | precomputed `pre_bsub` / `pre_bsubm` |
 | **R-cli** | none | `nextflow run roadie.nf --list-tasks`, then `nextflow run roadie.nf --help recyze` | roadie CLI workflow, `showHelp` |
 | **N-noin** | none | `nextflow run main.nf` (no `--in`) | must fail with `Please specify the project directory with --in` and run no tasks |
 | **N-deprecated** | E1 + empty `illumination_profiles/x` | `--in P` | must fail with `illumination_profiles/ is deprecated` |
@@ -532,7 +542,7 @@ Things to watch:
 - The `recyze` step in `modules/segmentation.nf` goes through `roadie`, which
   has no `when:`. Its existing gating via `branch` is unaffected.
 - `--start-at` / `--stop-at` combinations depend entirely on this gating. The
-  partial-run steps in `ci.yml` (lines 132–142) are the main regression test.
+  partial-run steps in `ci.yml` (job `ex001-by-step`) are the main regression test.
 
 **Testing.** This is the first phase in which the strict candidate runs the
 pipeline. Leave explicit `false` values off the command line (finding 4), and
@@ -640,7 +650,7 @@ under the strict parser too, with no String/Boolean exception.
 | T-precedence | the command line still overrides the project's `params.yml`, checked through the effect on tasks (coreograph must not run) |
 | T-paramsfile | values from `-params-file` are left alone |
 | E1-recyze | `auto` type: `--segmentation-channel 1` stays an Integer in `params.yml`; bare `--segmentation-recyze` becomes Boolean `true` |
-| E1-seg-multi | `string` type: comma-separated `--segmentation unmicst,cellpose` still splits into a list |
+| E1-seg-multi | `string` type: comma-separated `--segmentation ilastik,cellpose` still splits into a list |
 | AF-backsub | the bare `--background` flag (String `"true"` under the strict parser) |
 | AF-rollingball | module options as `auto`: rerun with `--imagej-rolling-ball-opts 100` added, and `params.yml` must record an Integer |
 | N-unknown | `--in P --stop-at registration --not-a-param 1` and `--illum` (deprecated) must fail with the same messages as the baseline |
@@ -682,7 +692,8 @@ capture is the resolved configuration. No exemplar data is needed.
       on `~/exemplar-002`. This is the only time registration of exemplar-002
       is rerun instead of seeded.
 - [ ] Repeat the remaining partial runs from `ci.yml` (each `--downstream`
-      method) on `~/exemplar-001`.
+      method) on `~/exemplar-001`, with `--segmentation ilastik` added (see
+      *Test case catalog*).
 - [ ] Compare `qc/params.yml` between the pre-migration baseline and the
       strict-parser candidate. It must be identical (finding 4).
 - [ ] T-priority on all three candidate runtimes matches the expected table
