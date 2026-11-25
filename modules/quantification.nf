@@ -1,4 +1,3 @@
-
 process mcquant {
     container "${params.contPfx}${module.container}:${module.version}"
 

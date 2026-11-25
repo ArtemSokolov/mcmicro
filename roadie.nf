@@ -1,6 +1,5 @@
 nextflow.enable.dsl=2
 
-
 def roadieHelp() {
   println """
   Roadie: miscellaneous MCMICRO-related tasks

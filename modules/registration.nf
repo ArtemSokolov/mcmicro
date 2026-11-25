@@ -1,4 +1,3 @@
-
 process ashlar {
     container "${params.contPfx}${module.container}:${module.version}"
     publishDir "${params.in}/registration", mode: "${params.publish_dir_mode}",

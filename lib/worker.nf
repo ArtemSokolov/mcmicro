@@ -1,4 +1,3 @@
-
 // General worker process
 //
 // Inputs:

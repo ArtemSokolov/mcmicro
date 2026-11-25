@@ -1,4 +1,3 @@
-
 process s3seg {
     container "${params.contPfx}${module.container}:${module.version}"
 

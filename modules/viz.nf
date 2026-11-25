@@ -1,4 +1,3 @@
-
 process autominerva {
     container "${params.contPfx}${module.container}:${module.version}"
 
