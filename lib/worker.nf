@@ -1,4 +1,3 @@
-import mcmicro.*
 
 // General worker process
 //
@@ -33,11 +32,11 @@ process worker {
     publishDir "${pubDir}", mode: "${params.publish_dir_mode}", pattern: 'plots/**'
 
     // QC
-    publishDir "${Flow.QC(params.in, module.name)}", mode: "${mcp.workflow['qc-files']}",
+    publishDir "${mcmicro.Flow.QC(params.in, module.name)}", mode: "${mcp.workflow['qc-files']}",
       pattern: 'qc/**', saveAs: { fn -> fn.replaceFirst("qc/","") }
     
     // Provenance
-    publishDir "${Flow.QC(params.in, 'provenance')}", mode: 'copy', 
+    publishDir "${mcmicro.Flow.QC(params.in, 'provenance')}", mode: 'copy', 
       pattern: '.command.{sh,log}',
       saveAs: {fn -> fn.replace('.command', "${module.name}-${task.index}")}
 
@@ -61,7 +60,7 @@ process worker {
     // Provenance
     tuple path('.command.sh'), path('.command.log')
 
-    when: Flow.doirun(step, mcp.workflow)
+    when: mcmicro.Flow.doirun(step, mcp.workflow)
     
     // We are creating a copy of the model file to deal with some tools locking files
     // Without this copying, the lock prevents parallel execution of multiple processes
@@ -69,7 +68,7 @@ process worker {
     script:
 
     // Find module specific parameters
-    def opts = "${Opts.moduleOpts(module, mcp)}"
+    def opts = "${mcmicro.Opts.moduleOpts(module, mcp)}"
 
     // Determine if we need to pass the input as a membrane image also
     def mmbr = (opts.indexOf('membrane') > -1 && module.containsKey('membrane-input')) ?

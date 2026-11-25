@@ -28,9 +28,9 @@ Step 3: Run the module from the main workflow in main.nf
   a: add an include statement to import the relevant workflow. For example:
 
     ...
-    include {downstream}     from "$projectDir/modules/downstream"
-    include {viz}            from "$projectDir/modules/viz"
-    include {report}         from "$projectDir/modules/report"   // <- importing the new module
+    include {downstream}     from './modules/downstream'
+    include {viz}            from './modules/viz'
+    include {report}         from './modules/report'   // <- importing the new module
   
   b: add a statement calling the module near the bottom of the main workflow:
 
@@ -45,8 +45,8 @@ Step 3: Run the module from the main workflow in main.nf
 
 */
 
-// Import utility functions from lib/mcmicro/*.groovy
-import mcmicro.*
+// Utility functions from lib/mcmicro/*.groovy are used through their fully
+// qualified names, e.g. mcmicro.Util.getImageID() (no import is needed)
 
 // Process name will appear in the the nextflow execution log
 // While not strictly required, it's a good idea to make the 
@@ -67,7 +67,7 @@ process snr {
     // Stores .command.sh and .command.log from the work directory
     //   to the project provenance
     // No change to this line is required
-    publishDir "${Flow.QC(params.in, 'provenance')}", mode: 'copy', 
+    publishDir "${mcmicro.Flow.QC(params.in, 'provenance')}", mode: 'copy', 
       pattern: '.command.{sh,log}',
       saveAs: {fn -> fn.replace('.command', "${module.name}-${task.index}")}
     
@@ -97,9 +97,10 @@ process snr {
 
     // The command to be executed inside the tool container
     // The command must write all outputs to the current working directory (.)
-    // Opts.moduleOpts() will identify and return the appropriate module options
+    // mcmicro.Opts.moduleOpts() will identify and return the appropriate module options
+  script:
     """    
-    python /app/mytool.py --image $img --features $sft ${Opts.moduleOpts(module, mcp)}
+    python /app/mytool.py --image $img --features $sft ${mcmicro.Opts.moduleOpts(module, mcp)}
     """
 }
 
@@ -117,12 +118,12 @@ workflow report {
   main:
     
     // Match images against feature tables
-    id_imgs = imgs.map{ it -> tuple(Util.getImageID(it), it) }
-    id_sfts = sfts.map{ it -> tuple(Util.getFileID(it, '--'), it) }
+    id_imgs = imgs.map{ f -> tuple(mcmicro.Util.getImageID(f), f) }
+    id_sfts = sfts.map{ f -> tuple(mcmicro.Util.getFileID(f, '--'), f) }
 
     // Apply the process to each (image, sft) pair
     id_imgs.combine(id_sfts, by:0)
-        .map{ tag, img, sft -> tuple(img, sft) } | snr
+        .map{ _tag, img, sft -> tuple(img, sft) } | snr
 
     // Return the outputs produced by the tool
   emit:

@@ -1,4 +1,4 @@
-include {worker} from "$projectDir/lib/worker"
+include {worker} from '../lib/worker'
 
 workflow downstream {
   take:
@@ -8,7 +8,7 @@ workflow downstream {
   main:
 
     // Determine if there are any custom models specified
-    inp = Channel.of( mcp.modules['downstream'] )
+    inp = channel.of( mcp.modules['downstream'] )
         .flatten()
         .map{ it -> String m = "${it.name}-model";
             tuple(it, mcp.workflow.containsKey(m) ?

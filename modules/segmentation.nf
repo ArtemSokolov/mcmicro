@@ -1,4 +1,3 @@
-import mcmicro.*
 
 process s3seg {
     container "${params.contPfx}${module.container}:${module.version}"
@@ -8,12 +7,12 @@ process s3seg {
       pattern: '{*/*.ome.tif,*.csv}', saveAs: {f -> file(f).name}
 
     // QC
-    publishDir "${Flow.QC(params.in, '/s3seg/' + tag)}",
+    publishDir "${mcmicro.Flow.QC(params.in, '/s3seg/' + tag)}",
       mode: "${mcp.workflow['qc-files']}",
       pattern: '*/qc/**', saveAs: {f -> file(f).name}
 
     // Provenance
-    publishDir "${Flow.QC(params.in, 'provenance')}", mode: 'copy',
+    publishDir "${mcmicro.Flow.QC(params.in, 'provenance')}", mode: 'copy',
       pattern: '.command.{sh,log}',
       saveAs: {fn -> fn.replace('.command', "${module.name}-${task.index}")}
     
@@ -32,7 +31,7 @@ process s3seg {
       path('*/qc/**'), optional: true
       tuple path('.command.sh'), path('.command.log')
 
-    when: Flow.doirun('watershed', mcp.workflow)
+    when: mcmicro.Flow.doirun('watershed', mcp.workflow)
     
     script:
     def crop = mcp.workflow['tma'] ?
@@ -41,12 +40,12 @@ process s3seg {
     """
     python /app/S3segmenter.py $crop \
        --imagePath $core --stackProbPath $probs \
-       $bypass ${Opts.moduleOpts(module, mcp)} --outputPath .
+       $bypass ${mcmicro.Opts.moduleOpts(module, mcp)} --outputPath .
     """
 }
 
-include {worker} from "$projectDir/lib/worker"
-include {roadie} from "$projectDir/roadie"
+include {worker} from '../lib/worker'
+include {roadie} from '../roadie.nf'
 
 workflow segmentation {
   take:
@@ -57,7 +56,7 @@ workflow segmentation {
 
   main:
     // A channel iterating over the segmentation modules
-    moduleSeg = Channel.of( mcp.modules['segmentation'] ).flatten()
+    moduleSeg = channel.of( mcp.modules['segmentation'] ).flatten()
 
     // Define relevant paths
     pathPM  = "${params.in}/probability-maps"
@@ -75,15 +74,15 @@ workflow segmentation {
     // Account for 0-based indexing in recyze
     chan = mcp.workflow.containsKey('segmentation-channel') ?
       mcp.workflow['segmentation-channel'].toString()
-        .tokenize().collect{"${(it as int)-1}"}.join(' ') : '0'
+        .tokenize().collect{ c -> "${(c as int)-1}"}.join(' ') : '0'
 
     nuc_chan = mcp.workflow.containsKey('segmentation-nuclear-channel') ?
       mcp.workflow['segmentation-nuclear-channel'].toString()
-        .tokenize().collect{"${(it as int)-1}"}.join(' ') : '0'
+        .tokenize().collect{ c -> "${(c as int)-1}"}.join(' ') : '0'
 
     mem_chan = mcp.workflow.containsKey('segmentation-membrane-channel') ?
       mcp.workflow['segmentation-membrane-channel'].toString()
-        .tokenize().collect{"${(it as int)-1}"}.join(' ') : ''
+        .tokenize().collect{ c -> "${(c as int)-1}"}.join(' ') : ''
 
     recyzeOut = roadie('recyze', 
       recyzeIn.toCut,
@@ -94,8 +93,8 @@ workflow segmentation {
       false, '', '' )
 
     // Determine IDs of images
-    id_cut   = recyzeOut.map{ f -> tuple(Util.getFileID(f, '_crop.ome'), f) }
-    id_uncut = recyzeIn.noCut.map{ f -> tuple(Util.getImageID(f), f) }
+    id_cut   = recyzeOut.map{ f -> tuple(mcmicro.Util.getFileID(f, '_crop.ome'), f) }
+    id_uncut = recyzeIn.noCut.map{ f -> tuple(mcmicro.Util.getImageID(f), f) }
     id_imgs = id_cut.mix(id_uncut)
 
     // Determine if there are any custom models for each module
@@ -117,7 +116,7 @@ workflow segmentation {
     // Merge against precomputed probability maps
     //  and information about whether the module needs watershed
     allpmaps = prepmaps.map{ mtd, f ->
-        tuple(Util.getFileID(f, '-pmap'), mtd, f) }
+        tuple(mcmicro.Util.getFileID(f, '-pmap'), mtd, f) }
         .mix(worker.out.res)
         .combine( needWS, by:1 )   // changes order to (mtd, tag, f, ws)
     
@@ -133,7 +132,7 @@ workflow segmentation {
     // Whole-slide images have no TMA masks
     id_wsi = id_imgs.map{ id, _2 -> tuple(id, 'NO_MASK') }
         .filter{ !mcp.workflow['tma'] }
-    id_masks = tmamasks.map{ f -> tuple(Util.getFileID(f,'_mask'), f) }
+    id_masks = tmamasks.map{ f -> tuple(mcmicro.Util.getFileID(f,'_mask'), f) }
         .mix(id_wsi)
 
     // Combine everything based on IDs

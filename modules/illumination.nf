@@ -1,6 +1,3 @@
-import mcmicro.*
-import java.nio.file.Paths
-
 def escapeForImagej(s) {
     // When passing an arbitrary string as an ImageJ macro parameter value, we
     // must backslash-escape backslashes and double-quotes and wrap the whole
@@ -16,7 +13,7 @@ process illumination {
       pattern: '*.tif'
 
     // Provenance
-    publishDir "${Flow.QC(params.in, 'provenance')}", mode: 'copy', 
+    publishDir "${mcmicro.Flow.QC(params.in, 'provenance')}", mode: 'copy', 
       pattern: '.command.{sh,log}',
       saveAs: {fn -> fn.replace('.command', "${module.name}-${task.index}")}
     
@@ -29,13 +26,13 @@ process illumination {
       tuple val(sname), path('*-ffp.tif'), emit: ffp
       tuple path('.command.sh'), path('.command.log')
 
-    when: Flow.doirun('illumination', wfp)
+    when: mcmicro.Flow.doirun('illumination', wfp)
     
     script:
-    def relPath = Paths.get(relPath)
-    def fn = escapeForImagej(relPath)
-    def xpn = escapeForImagej(relPath.subpath(0, 1))
-    def macroParams = Util.escapeForShell(
+    def relP = java.nio.file.Paths.get(relPath)
+    def fn = escapeForImagej(relP)
+    def xpn = escapeForImagej(relP.subpath(0, 1))
+    def macroParams = mcmicro.Util.escapeForShell(
         """filename=$fn,output_dir=".",experiment_name=$xpn"""
     )
     """

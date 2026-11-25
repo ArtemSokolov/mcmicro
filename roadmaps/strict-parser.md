@@ -368,7 +368,7 @@ need design decisions and careful testing. Each phase follows the cycle in
 capture. Check that the new lint job runs and reports the current errors, and
 that the pinned legacy-parser CI jobs pass as they did before.
 
-### Phase 1 — Mechanical, behavior-preserving fixes
+### Phase 1 — Mechanical, behavior-preserving fixes [Done]
 
 Each item is a direct lint error (or deprecation warning) with a known fix.
 
@@ -729,3 +729,16 @@ capture is the resolved configuration. No exemplar data is needed.
   run 26.10.2 legacy only; informational `lint` job;
   `roadmaps/**` excluded from CI triggers; README documents
   `NXF_SYNTAX_PARSER=v1`.
+- **Phase 1:** all items done except the optional `file(...)` → `path(...)`
+  change (left as is). Strict lint: the only remaining errors are the `main.nf`
+  top-level statements (Phase 2) and `when:` (Phase 3); no new errors.
+  Candidates 25.04.7 and 26.10.2 (legacy) match the baseline on E1-default,
+  E1-illum, E1-recyze, E1-downstream, E1-viz, E2-dearray, AF-backsub,
+  AF-rollingball and R-cli: identical exit codes, `tasks.txt`, `params.yml` and
+  `commands/`. Differing checksums are confined to nondeterministic outputs
+  (TIFFs, plot PDFs, viz JPGs; the baseline differs from itself too).
+  Pre-existing problems recorded: E1-recyze fails in s3seg on the baseline
+  (`--segmentation-channel 1` becomes `--probMapChan 1`, which does not exist in
+  the ilastik probability map: `IndexError`), so it only checks that the failure
+  is unchanged. AF-rollingball cannot use `-with-trace` (its container has no
+  `ps`), so tasks come from the log.

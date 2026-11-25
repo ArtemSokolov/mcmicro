@@ -8,17 +8,12 @@ if( !(nextflow.version >= '22.04.3') ) {
 
 nextflow.enable.dsl=2
 
-import mcmicro.*
-
-import org.yaml.snakeyaml.Yaml
-import org.yaml.snakeyaml.DumperOptions
-
 // Expecting --in parameter
 if( !params.containsKey('in') )
     error "Please specify the project directory with --in"
 
 // Parse MCMICRO parameters (mcp)
-mcp = Opts.parseParams(
+mcp = mcmicro.Opts.parseParams(
     params, 
     "$projectDir/config/schema.yml",
     "$projectDir/config/defaults.yml"
@@ -30,26 +25,26 @@ wfp = mcp.workflow
 // Identify relevant precomputed intermediates
 // The actual paths to intermediate files are given by
 //   pre.collect{ "${params.in}/$it" }
-pre = Flow.precomputed(wfp)
+pre = mcmicro.Flow.precomputed(wfp)
 
 // Check that deprecated locations are empty
-Channel.fromPath( "${params.in}/illumination_profiles/*" )
-    .subscribe{ it ->
+channel.fromPath( "${params.in}/illumination_profiles/*" )
+    .subscribe{ _f ->
     error "illumination_profiles/ is deprecated; please use illumination/ instead"
 }
 
 // Identify marker information
-chMrk = Channel.fromPath( "${params.in}/markers.csv", checkIfExists: true )
+chMrk = channel.fromPath( "${params.in}/markers.csv", checkIfExists: true )
 
 // Helper functions for finding raw images and precomputed intermediates
 findFiles0 = { key, pattern -> pre[key] ?
-    Channel.fromPath("${params.in}/$key/$pattern") : Channel.empty()
+    channel.fromPath("${params.in}/$key/$pattern") : channel.empty()
 }
 findFiles = { key, pattern, ife -> pre[key] ?
-    Channel.fromPath("${params.in}/$key/$pattern").ifEmpty(ife) : Channel.empty()
+    channel.fromPath("${params.in}/$key/$pattern").ifEmpty(ife) : channel.empty()
 }
 findDirs = { key, ife -> pre[key] ? 
-    Channel.fromPath("${params.in}/$key/*", type: 'dir').ifEmpty(ife) : Channel.empty()
+    channel.fromPath("${params.in}/$key/*", type: 'dir').ifEmpty(ife) : channel.empty()
 }
 // Some image formats store multiple fields of view in a single file. Other
 // formats store each field separately, typically in .tif files, with a separate
@@ -65,10 +60,10 @@ findDirs = { key, ife -> pre[key] ?
 stagingDirs = findDirs('staging', 
     {error "No subdirectories found in staging directory"})
 staging_in = stagingDirs
-    .map{ tuple(
-        Util.getSampleName(it, file("${params.in}/staging")),
-        Util.getCycleNameFromDir(it, file("${params.in}/staging")),
-        formatType == "single" ? it : it.parent
+    .map{ d -> tuple(
+        mcmicro.Util.getSampleName(d, file("${params.in}/staging")),
+        mcmicro.Util.getCycleNameFromDir(d, file("${params.in}/staging")),
+        formatType == "single" ? d : d.parent
     )}
 // Here we assemble tuples of 1) path to stage for each raw image (might be a
 // directory) and 2) relative path to the main file for each image. Processes
@@ -81,19 +76,19 @@ staging_in = stagingDirs
 rawFiles = findFiles('raw', "**${formatPattern}",
 		     {error "No images found in ${params.in}/raw"})
 raw = rawFiles
-    .map{ tuple(
-        Util.getSampleName(it, file("${params.in}/raw")),
-        formatType == "single" ? it : it.parent, 
-        it
+    .map{ f -> tuple(
+        mcmicro.Util.getSampleName(f, file("${params.in}/raw")),
+        formatType == "single" ? f : f.parent, 
+        f
     )}
     .map{ sampleName, toStage, relPath -> 
         tuple(sampleName, toStage, toStage.parent.relativize(relPath).toString()) }
 
 // Find precomputed intermediates
 pre_dfp   = findFiles0('illumination', "**-dfp.tif")
-    .map{ tuple(Util.getSampleName(it, file("${params.in}/illumination")), it) }
+    .map{ f -> tuple(mcmicro.Util.getSampleName(f, file("${params.in}/illumination")), f) }
 pre_ffp   = findFiles0('illumination', "**-ffp.tif")
-    .map{ tuple(Util.getSampleName(it, file("${params.in}/illumination")), it) }
+    .map{ f -> tuple(mcmicro.Util.getSampleName(f, file("${params.in}/illumination")), f) }
 pre_img   = findFiles('registration', "*.{ome.tiff,ome.tif,tif,tiff,btf,qptiff}",
     {error "No pre-stitched image in ${params.in}/registration"})
 pre_bsub  = findFiles('background', "*.ome.tif",
@@ -107,7 +102,7 @@ pre_masks = findFiles('dearray', "masks/*.tif",
 pre_pmap  = findFiles('probability-maps', "*/*-pmap.tif",
     {error "No probability maps found in ${params.in}/probability-maps"})
     .map{ f -> tuple(f.getParent().getName(), f) }
-    .filter{ wfp['segmentation'].contains(it[0]) }
+    .filter{ t -> wfp['segmentation'].contains(t[0]) }
 pre_seg   = findFiles('segmentation', "**.tif",
     {error "No segmentation masks in ${params.in}/segmentation"})
     .map{ f -> tuple(f.getParent().getName(), f) }.groupTuple()
@@ -115,15 +110,15 @@ pre_qty   = findFiles('quantification', "*.csv",
     {error "No quantification tables in ${params.in}/quantification"})
 
 // Import individual modules
-include {staging}        from "$projectDir/modules/staging"
-include {illumination}   from "$projectDir/modules/illumination"
-include {registration}   from "$projectDir/modules/registration"
-include {dearray}        from "$projectDir/modules/dearray"
-include {segmentation}   from "$projectDir/modules/segmentation"
-include {quantification} from "$projectDir/modules/quantification"
-include {downstream}     from "$projectDir/modules/downstream"
-include {viz}            from "$projectDir/modules/viz"
-include {background}     from "$projectDir/modules/background"
+include {staging}        from './modules/staging'
+include {illumination}   from './modules/illumination'
+include {registration}   from './modules/registration'
+include {dearray}        from './modules/dearray'
+include {segmentation}   from './modules/segmentation'
+include {quantification} from './modules/quantification'
+include {downstream}     from './modules/downstream'
+include {viz}            from './modules/viz'
+include {background}     from './modules/background'
 
 // Define the primary mcmicro workflow
 workflow {
@@ -135,7 +130,7 @@ workflow {
         }.toSortedList { a, b -> a[1] <=> b[1] }
         .flatMap()
         .map{
-            sample, cycle, path, name ->
+            sample, _cycle, path, name ->
             tuple(sample, path, name)
         }.set{ sorted_staging }
     raw = raw.mix(sorted_staging)
@@ -147,13 +142,13 @@ workflow {
     img = registration.out.mix(pre_img)
 
     // Should background subtraction be applied?
-    img = img.
-        branch{
+    img = img
+        .branch{
             nobs: !wfp.background
             bs: wfp.background
         }
-    chMrk = chMrk.
-        branch{
+    chMrk = chMrk
+        .branch{
             nobs: !wfp.background
             bs: wfp.background
         }
@@ -205,11 +200,11 @@ workflow.onComplete {
     file(path_qc).mkdirs()
     
     // Write out MCMICRO parameters
-    DumperOptions style = new DumperOptions();
+    def style = new org.yaml.snakeyaml.DumperOptions();
     style.setPrettyFlow(true);
-    style.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+    style.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
     file("${params.in}/qc/params.yml").withWriter{ out -> 
-        new Yaml(style).dump(mcp, out) 
+        new org.yaml.snakeyaml.Yaml(style).dump(mcp, out) 
     }
 
     // Store additional metadata

@@ -1,4 +1,3 @@
-import mcmicro.*
 
 process autominerva {
     container "${params.contPfx}${module.container}:${module.version}"
@@ -7,7 +6,7 @@ process autominerva {
     publishDir "${params.in}/viz", mode: "${params.publish_dir_mode}", pattern: "$tag/**"
 
     // Provenance
-    publishDir "${Flow.QC(params.in, 'provenance')}", mode: 'copy', 
+    publishDir "${mcmicro.Flow.QC(params.in, 'provenance')}", mode: 'copy', 
       pattern: '.command.{sh,log}',
       saveAs: {fn -> fn.replace('.command', "${module.name}-${task.index}")}
     
@@ -23,8 +22,9 @@ process autominerva {
     path('*/qc/**'), optional: true
     tuple path('.command.sh'), path('.command.log')
 
-  when: Flow.doirun('viz', wfp)
+  when: mcmicro.Flow.doirun('viz', wfp)
 
+  script:
     """
     python /app/story.py --in $img --m $markers --out story.json
     python /app/minerva-author/src/save_exhibit_pyramid.py $img story.json $tag
@@ -39,7 +39,7 @@ workflow viz {
 
   main:
     
-    inputs = imgs.map{ it -> tuple(Util.getImageID(it), it) }.combine( markers )
+    inputs = imgs.map{ f -> tuple(mcmicro.Util.getImageID(f), f) }.combine( markers )
     autominerva(mcp.workflow, mcp.modules['viz'], inputs)
 
   emit:
