@@ -9,6 +9,8 @@ parent: Tutorial
 
 ## Install Nextflow
 
+MCMICRO requires Nextflow 25.04.7 or later. If you have an older version installed, update it with `nextflow self-update`.
+
 If not already installed, install Java: [https://adoptopenjdk.net/](https://adoptopenjdk.net/){:target="_blank"}
 <style>
   code {

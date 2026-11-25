@@ -77,7 +77,10 @@ These were tested directly against Nextflow 26.10.2 (both parsers) and 25.04.7.
    compiles under the strict parser. Both the legacy parser and Nextflow
    25.04.7 reject it with `Unknown execution scope 'onComplete:'`. An inline
    `workflow.onComplete { ... }` handler inside the entry workflow body works on
-   all three and can see local variables such as `mcp`.
+   all three and can see local variables such as `mcp`. However, `params`,
+   `workflow` and `projectDir` are `null` inside such a handler (checked on all
+   three), so values taken from them must first be stored in local variables.
+   A failing handler is only logged; the run still exits with code 0.
 4. **Under the strict parser, undeclared CLI parameters are always Strings.**
 
    | `nextflow run types.nf --a 2 --b false --c --d 1.5` | `a` | `b` | `c` | `d` |
@@ -288,7 +291,7 @@ Files (MCMICRO parameter files use the `workflow:` namespace):
 workflow:
   tma: true
   segmentation-channel: 2
-  qc-files: copy
+  qc-files: symlink
 ```
 
 ```yaml
@@ -314,14 +317,18 @@ tma: true
 segmentation-channel: 6
 ```
 
+The project's `qc-files` value must differ from `publish_dir_mode` (`copy`),
+which is what the default `inherit` resolves to. Otherwise, a value that is
+wrongly reset to the default would go unnoticed.
+
 | Run | Sources | `tma` | `segmentation-channel` | `qc-files` | Checks |
 |---|---|---|---|---|---|
-| P0 | defaults | `false` | (absent) | `inherit` | defaults apply |
-| P1 | + project `params.yml` | `true` | `2` | `copy` | level 2 > level 1 |
-| P2 | + `--params f3.yml` | `false` | `3` | `copy` | level 3 > level 2; a key that level 3 doesn't set (`qc-files`) keeps its lower-level value |
-| P3 | + `-params-file f35.yml` | `true` | `4` | `copy` | the `-params-file` `workflow:` section > level 3 |
-| P4 | + `--tma false --segmentation-channel 5` | `false` | `5` | `copy` | command line (level 4) > everything |
-| P5 | project `params.yml` + `--params f3.yml` + `-params-file f5.yml` + `--tma false` | `false` | `6` | `copy` | top-level `-params-file` keys > its `workflow:` section; the command line > top-level `-params-file` keys |
+| P0 | defaults | `false` | (absent) | `copy` | defaults apply (`inherit` resolves to `publish_dir_mode`) |
+| P1 | + project `params.yml` | `true` | `2` | `symlink` | level 2 > level 1 |
+| P2 | + `--params f3.yml` | `false` | `3` | `symlink` | level 3 > level 2; a key that level 3 doesn't set (`qc-files`) keeps its lower-level value |
+| P3 | + `-params-file f35.yml` | `true` | `4` | `symlink` | the `-params-file` `workflow:` section > level 3 |
+| P4 | + `--tma false --segmentation-channel 5` | `false` | `5` | `symlink` | command line (level 4) > everything |
+| P5 | project `params.yml` + `--params f3.yml` + `-params-file f5.yml` + `--tma false` | `false` | `6` | `symlink` | top-level `-params-file` keys > its `workflow:` section; the command line > top-level `-params-file` keys |
 
 Checked on 25.04.7 and on 26.10.2 under both parsers: when the same key is
 both a top-level `-params-file` key and a command-line argument, Nextflow
@@ -451,14 +458,14 @@ Strict candidate: lint only.
 `staging.nf` (same `GStringTemplateEngine` change) cannot be run locally.
 Check it with lint and code review.
 
-### Phase 2 — Restructure `main.nf` top level
+### Phase 2 — Restructure `main.nf` top level [Done]
 
 Under the strict parser, a script may contain only declarations (`include`,
 `params`, `def` functions, `process`, `workflow`) at the top level. `main.nf`
 has roughly 100 lines of statements before `workflow {` (lines 3–115) and the
 `workflow.onComplete` handler after it (lines 202–221).
 
-- [ ] **Version check (lines 3–7):** replace the top-level `if/exit` with
+- [x] **Version check (lines 3–7):** replace the top-level `if/exit` with
       `manifest { nextflowVersion = '!>=25.04.7' }` in `nextflow.config` (the
       `!` prefix makes it a hard error instead of a warning). This raises the
       minimum from 22.04.3. The manifest applies to every script in the repo,
@@ -466,26 +473,27 @@ has roughly 100 lines of statements before `workflow {` (lines 3–115) and the
       `exemplar.nf` currently still runs on 22.10.8, so this is a
       user-visible change. Note it in `CHANGES.md` and update the minimum
       version in the installation docs.
-- [ ] **`--in` check (lines 17–18):** declare `params.in = null` at the top
+- [x] **`--in` check (lines 17–18):** declare `params.in = null` at the top
       level and move the check into the workflow. Note that `Opts.cleanParams`
       already treats `in` as a protected keyword, so declaring it does not
       change `mcp`.
-- [ ] **Helper closures (lines 45–53):** `findFiles0`, `findFiles`, and
+- [x] **Helper closures (lines 45–53):** `findFiles0`, `findFiles`, and
       `findDirs` are closures assigned to variables. Calling them like
       functions is rejected (`findFiles is not defined`). Convert them to
       top-level `def` functions and pass `pre` in explicitly, e.g.
       `def findFiles(pre, key, pattern, ife) { ... }`.
-- [ ] **Remaining statements (lines 21–115):** move parameter parsing (`mcp`,
+- [x] **Remaining statements (lines 21–115):** move parameter parsing (`mcp`,
       `wfp`, `pre`), the deprecated `illumination_profiles/` check, and all
       channel construction into the entry `workflow`, declaring each variable
       with `def`. The multiple assignment `(formatType, formatPattern) = ...`
       (line 61) becomes `def (formatType, formatPattern) = ...`; it lints
       cleanly inside the workflow.
-- [ ] **Includes (lines 118–126):** move them to the top of the file, before
+- [x] **Includes (lines 118–126):** move them to the top of the file, before
       any function or workflow.
-- [ ] **`workflow.onComplete` (lines 202–221):** move it *inside* the entry
+- [x] **`workflow.onComplete` (lines 202–221):** move it *inside* the entry
       workflow body as `workflow.onComplete { ... }` (finding 3), so it can
-      still reference `mcp`.
+      still reference `mcp`. Store `params.roadie`, `workflow` and the QC path
+      in local variables first.
 
 In the scratch copy, Phases 1–2 plus the `when:` removal from Phase 3 were
 enough for `nextflow lint .` to report no errors in any file the main pipeline
@@ -743,3 +751,29 @@ capture is the resolved configuration. No exemplar data is needed.
   single-page ilastik probability map: `IndexError`), so the case now uses
   cellpose. AF-rollingball cannot use `-with-trace` (its container has no
   `ps`), so tasks come from the log.
+- **Phase 2:** all items done. In addition, the `markers.csv` channel now comes
+  before the `illumination_profiles/` check: with the original order, Nextflow
+  24.10.9 failed with a compile error instead of the version message. Strict
+  lint: the only remaining errors are the 8 `when:` errors (Phase 3).
+  Candidates 25.04.7 and 26.10.2 (legacy) match the baseline on E1-default,
+  E1-steps, E1-illum, E2-dearray, AF-backsub, AF-bs-pre, T-priority, N-noin,
+  N-deprecated and N-noreg (new: `--start-at segmentation` without
+  `registration/` must fail with the same message as the baseline): identical
+  exit codes, `tasks.txt`, `params.yml`, `commands/` and error messages, with
+  checksum differences only in nondeterministic outputs. N-version passed:
+  22.10.8, 23.10.1, 24.04.4, 24.10.9 and 25.04.6 refuse all three scripts.
+  - The first candidate runs showed that `qc/params.yml` and `qc/metadata.yml`
+    were no longer written (see finding 3). Fixed before the results above.
+  - The T-priority baseline matches the table, except that the P0 `qc-files`
+    cell read `inherit`. The recorded value has always been `copy`, so the
+    cell was corrected.
+  - The project `params.yml` in T-priority originally set `qc-files: copy`, the
+    same value the default resolves to, so P2 could not show that the project's
+    value is kept. It now sets `symlink`. T-priority was rerun: the baseline and
+    both candidates match the updated table (values and types).
+  - Run the candidate runtimes one after the other: running both in parallel
+    can exhaust the memory of a 16 GB machine.
+- **Found for Phase 3:** under the strict parser (26.10.2),
+  `nextflow run roadie.nf --list-tasks` and `--help recyze` fail with
+  `No such variable: specs` (`roadie.nf:49`), with or without the Phase 2
+  changes.

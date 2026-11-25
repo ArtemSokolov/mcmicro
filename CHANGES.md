@@ -1,4 +1,8 @@
 
+### 2026-11-25
+
+* The minimum supported Nextflow version is now 25.04.7 (previously 22.04.3). The requirement applies to every script in the repository, including `exemplar.nf` and `roadie.nf`. To update Nextflow, run `nextflow self-update`.
+
 ### 2024-08-26
 
 * Add staging step before illumination - `start-at: staging`
