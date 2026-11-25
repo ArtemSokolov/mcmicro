@@ -244,7 +244,8 @@ every run of a multi-run case: `main.nf` only picks up precomputed
 probability maps for the methods listed in `--segmentation` (`main.nf:110`),
 so a later `--start-at watershed` run without it would find no maps. New
 cases follow the same rule. Cases that stop at or before registration, or fail
-before any task runs, don't need it.
+before any task runs, don't need it. E1-recyze is the exception: it uses
+`cellpose`, which has no probability-map step (see its row).
 
 | ID | Data | Command | Exercises |
 |---|---|---|---|
@@ -252,7 +253,7 @@ before any task runs, don't need it.
 | **E1-illum** | E1, without `illumination/` | `--in P --start-at illumination --stop-at registration` | `illumination.nf`, profile channels in `main.nf`, joins in `registration.nf` |
 | **E1-steps** | E1 + seed `registration/` | in one project dir, in order: `--start-at segmentation --stop-at segmentation`, `--start-at watershed --stop-at watershed`, `--start-at quantification --stop-at quantification`, each with `--segmentation ilastik` (the `ci.yml` step-by-step runs, plus the flag) | discovering precomputed intermediates (`findFiles*`, `pre_*` channels) and `--start-at` / `--stop-at` gating |
 | **E1-seg-multi** | E1 + seed `registration/` | `--in P --start-at segmentation --segmentation ilastik,cellpose` | both segmentation branches: probability maps → s3seg and instance segmentation (`watershed: no`) |
-| **E1-recyze** | E1 + seed `registration/` | `--in P --start-at segmentation --stop-at segmentation --segmentation ilastik --segmentation-recyze --segmentation-channel 1` | `include` of `roadie`, `roadie.nf` `runTask` |
+| **E1-recyze** | E1 + seed `registration/` | `--in P --start-at segmentation --stop-at segmentation --segmentation cellpose --segmentation-recyze --segmentation-channel 1` | `include` of `roadie`, `roadie.nf` `runTask`. Uses cellpose (`watershed: no`), not ilastik: with `--segmentation-recyze` the channel passed to s3seg is always `--probMapChan 1`, which fails on the single-page ilastik probability map (`IndexError`) |
 | **E1-downstream** | E1 + seed `quantification/` | `--in P --start-at downstream --stop-at downstream --segmentation ilastik --downstream scimap` | `downstream.nf`, `worker` from downstream |
 | **E1-viz** | E1 | `--in P --stop-at registration --viz` | `viz.nf` (autominerva) |
 | **E2-dearray** | E2 + seed `e2-registration/` + `markers.csv`, `params.yml` | `--in P --start-at dearray --stop-at watershed --segmentation ilastik` | coreograph, `pre_img` for TMA, TMA mask joins in `segmentation.nf`, s3seg `--crop dearray` |
@@ -737,8 +738,8 @@ capture is the resolved configuration. No exemplar data is needed.
   AF-rollingball and R-cli: identical exit codes, `tasks.txt`, `params.yml` and
   `commands/`. Differing checksums are confined to nondeterministic outputs
   (TIFFs, plot PDFs, viz JPGs; the baseline differs from itself too).
-  Pre-existing problems recorded: E1-recyze fails in s3seg on the baseline
-  (`--segmentation-channel 1` becomes `--probMapChan 1`, which does not exist in
-  the ilastik probability map: `IndexError`), so it only checks that the failure
-  is unchanged. AF-rollingball cannot use `-with-trace` (its container has no
+  Pre-existing problem recorded: with ilastik, E1-recyze fails in s3seg on the
+  baseline (recyze forces `--probMapChan 1`, which does not exist in the
+  single-page ilastik probability map: `IndexError`), so the case now uses
+  cellpose. AF-rollingball cannot use `-with-trace` (its container has no
   `ps`), so tasks come from the log.
