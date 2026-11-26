@@ -55,8 +55,8 @@ pipeline: `main.nf` and everything it pulls in (`lib/worker.nf`,
 `nextflow lint` stops at the first fatal error in each file, so the initial
 lint (16 files with errors) hides most of the problems. To surface the full
 list, the fixes below were applied incrementally to a scratch copy of the repo
-and the linter was rerun until it came back clean. All line numbers refer to
-the files as of commit `07ccae6`.
+and the linter was rerun until it came back clean. Line numbers refer to the
+files as of commit `07ccae6`, except where a phase names a later commit.
 
 ## Verified findings
 
@@ -105,6 +105,43 @@ These were tested directly against Nextflow 26.10.2 (both parsers) and 25.04.7.
      each one is declared.
    - The legacy parser and 25.04.7 cannot parse the block at all
      (`Unexpected input: '{'`).
+6. **Under the strict parser, `publishDir` cannot refer to process inputs
+   outside a closure.** Found during Phase 2 (`roadie.nf`), then narrowed down
+   with probe scripts on 26.10.2 (both parsers) and 25.04.7:
+   - Any input variable in the path, `mode:`, `enabled:` or `pattern:`
+     argument of `publishDir` (as a GString or a bare expression) fails under
+     the strict parser with `No such variable: <input>`. The stack trace
+     (`MissingPropertyException ... ProcessDslV1`, from
+     `BaseScript.process`) shows that it fails while the process is being
+     *defined*. So a single affected process breaks **every** script that
+     includes it, even if the process is never called. This is why
+     `roadie.nf --list-tasks` fails although it exits before calling
+     `runTask`.
+   - Under the legacy parser and 25.04.7 the same directives work, because
+     they are evaluated per task.
+   - Inputs in other directives (`container`, `tag`), in `saveAs` closures,
+     and in output declarations (`path("${specs.output}")`) work on all three.
+   - What works on all three runtimes, with identical results:
+     `publishDir path: { <expr with inputs> }, ...`, and a `saveAs` closure
+     that returns `null` to skip a file.
+   - What does **not** work: a closure for `mode:` fails on all three runtimes
+     (`No signature of method: PublishDir.setMode()`). A closure for
+     `enabled:`, or as the positional path argument (`publishDir { ... }`),
+     fails silently: the run succeeds but **nothing is published**.
+   - Replacements checked on all three runtimes: a dynamic `pattern:` →
+     a `saveAs` glob filter
+     (`java.nio.file.FileSystems.getDefault().getPathMatcher("glob:...")`);
+     a dynamic `enabled:` → `saveAs` returning `null`; a dynamic `mode:` →
+     one `publishDir` per possible mode, each with a `saveAs` that returns
+     `null` unless its mode was selected (checked with `copy` and `symlink`).
+   - With every affected directive taken out (and `when:` removed), `main.nf`
+     gets past process definition under the strict parser. There are no
+     other errors of this kind.
+7. **`workflow.onComplete` works under the strict parser.** With the Phase 2
+   handler (finding 3), a strict run of `main.nf` (with `when:` and the
+   finding 6 directives removed in a scratch copy) writes `qc/params.yml` and
+   `qc/metadata.yml`, identical to the same run under the legacy parser.
+   Command-line values are still Strings there (finding 4), as expected.
 
 ## Testing strategy
 
@@ -130,6 +167,10 @@ Every phase goes through the same three-step cycle:
 
 Set `NXF_SYNTAX_PARSER` explicitly on every run, so the parser doesn't depend
 on a version's default or on the shell environment.
+
+Run the candidate runtimes one after the other, not in parallel: two
+concurrent pipeline runs can exhaust the memory of a 16 GB machine (seen in
+Phase 2).
 
 **Before the code compiles under the strict parser:** `main.nf` will not
 compile under the strict parser until Phases 1–3 are all in. For Phases 1 and
@@ -266,6 +307,7 @@ before any task runs, don't need it. E1-recyze is the exception: it uses
 | **R-cli** | none | `nextflow run roadie.nf --list-tasks`, then `nextflow run roadie.nf --help recyze` | roadie CLI workflow, `showHelp` |
 | **N-noin** | none | `nextflow run main.nf` (no `--in`) | must fail with `Please specify the project directory with --in` and run no tasks |
 | **N-deprecated** | E1 + empty `illumination_profiles/x` | `--in P` | must fail with `illumination_profiles/ is deprecated` |
+| **N-noreg** | E1, without `registration/` | `--in P --start-at segmentation --segmentation ilastik` | must fail with `No pre-stitched image in P/registration` and run no tasks (added in Phase 2) |
 | **N-version** | none | `nextflow run main.nf`, `exemplar.nf` and `roadie.nf` with `NXF_VER` set to a release below 25.04.7 (e.g. the latest 24.10.x) | the `manifest.nextflowVersion` check refuses all three (Phase 2) |
 | **T-types** | E1 | `--in P --start-at registration --stop-at dearray --tma false --background false --viz false`; and `--in P --start-at illumination --stop-at registration --illumination false` | CLI type conversion: tasks must be ashlar only, and `params.yml` must contain Booleans (Phase 4) |
 | **T-precedence** | E2 + seed `e2-registration/` | `--in P --start-at dearray --stop-at dearray --tma false` | a command-line value still overrides the project's `params.yml` (`tma: true`): coreograph must not run (Phase 4) |
@@ -498,7 +540,8 @@ has roughly 100 lines of statements before `workflow {` (lines 3–115) and the
 In the scratch copy, Phases 1–2 plus the `when:` removal from Phase 3 were
 enough for `nextflow lint .` to report no errors in any file the main pipeline
 uses. The scratch copy has only been linted, not run. Phases 3–4 are needed
-for correct behavior.
+for correct behavior. Running a clean-linting `main.nf` under the strict
+parser later showed that lint is not enough: see finding 6.
 
 **Testing.** Strict candidate: lint only. The only lint errors left should be
 the `when:` errors that Phase 3 removes.
@@ -532,19 +575,71 @@ coreograph(mcp, mcp.modules['dearray'], doRun ? tma : channel.empty())
 A small helper in `lib/mcmicro/Flow.groovy` (e.g.
 `Flow.gate(step, wfp, ch)`) would keep the call sites short.
 
-| Process | File:line | Current condition |
-|---|---|---|
-| `worker` | `lib/worker.nf:64` | `Flow.doirun(step, mcp.workflow)`; `step` is an input value, so gate at the callers in `modules/segmentation.nf` (`'segmentation'`) and `modules/downstream.nf` (`'downstream'`) |
-| `backsub` | `modules/background.nf:49` | `mcp.workflow["background"]` |
-| `coreograph` | `modules/dearray.nf:31` | `Flow.doirun('dearray', ...)` |
-| `illumination` | `modules/illumination.nf:32` | `Flow.doirun('illumination', wfp)`; this process is called directly from `main.nf:143`, so gate there |
-| `mcquant` | `modules/quantification.nf:24` | `Flow.doirun('quantification', ...)` |
-| `ashlar` | `modules/registration.nf:22` | `Flow.doirun('registration', ...)` |
-| `s3seg` | `modules/segmentation.nf:35` | `Flow.doirun('watershed', ...)` |
-| `phenoimager2mc` | `modules/staging.nf:25` | `Flow.doirun('staging', ...)` |
-| `autominerva` | `modules/viz.nf:26` | `Flow.doirun('viz', wfp)` |
-| `snr` (template) | `modules/template.nf:96` | `mcp.workflow["report"]`; update the template's guidance too |
-| `showHelp` | `roadie.nf:38` | `params.containsKey('help')`; uses only `params`, so it compiles today, but should be gated in the CLI workflow for consistency |
+Line numbers in this table are as of commit `392d9fe` (end of Phase 2), not
+`07ccae6`. The strict lint at the end of Phase 2 reports exactly 8 `when:`
+errors: the rows marked **error**. The other three conditions do not use a
+`lib/` class and compile today, but are converted too, so that no `when:` is
+left (it is deprecated under the strict parser) and all gating lives in one
+place.
+
+| Process | File:line | Current condition | Lint |
+|---|---|---|---|
+| `worker` | `lib/worker.nf:62` | `Flow.doirun(step, mcp.workflow)`; `step` is an input value, so gate at the callers in `modules/segmentation.nf` (`'segmentation'`) and `modules/downstream.nf` (`'downstream'`) | **error** |
+| `coreograph` | `modules/dearray.nf:29` | `Flow.doirun('dearray', ...)` | **error** |
+| `illumination` | `modules/illumination.nf:29` | `Flow.doirun('illumination', wfp)`; this process is called directly from `main.nf:167`, so gate there | **error** |
+| `mcquant` | `modules/quantification.nf:22` | `Flow.doirun('quantification', ...)` | **error** |
+| `ashlar` | `modules/registration.nf:20` | `Flow.doirun('registration', ...)` | **error** |
+| `s3seg` | `modules/segmentation.nf:33` | `Flow.doirun('watershed', ...)` | **error** |
+| `phenoimager2mc` | `modules/staging.nf:21` | `Flow.doirun('staging', ...)` | **error** |
+| `autominerva` | `modules/viz.nf:24` | `Flow.doirun('viz', wfp)` | **error** |
+| `backsub` | `modules/background.nf:43` | `mcp.workflow["background"]`; `main.nf` already sends it only the `bs` branch | compiles |
+| `snr` (template) | `modules/template.nf:96` | `mcp.workflow["report"]`; update the template's guidance too | compiles |
+| `showHelp` | `roadie.nf:38` | `params.containsKey('help')`; gate in the roadie CLI workflow | compiles |
+
+**`publishDir` directives that refer to inputs** (finding 6). Lint does not
+report these, but under the strict parser each one breaks every script that
+includes the process. This is the complete list (lines as of `392d9fe`):
+
+| Process | File:line | Input used | Fix |
+|---|---|---|---|
+| `illumination` | `modules/illumination.nf:12` | `sname` in the path | `path: { "${params.in}/illumination/${sname}" }` |
+| `coreograph` | `modules/dearray.nf:9–10` | `module` in the path, `mcp` in `mode:` (QC) | path closure; per-mode `publishDir` (below) |
+| `worker` | `lib/worker.nf:29–31` | `pubDir` in the path, `outfmt` in `pattern:` | path closure; `saveAs` glob filter for `outfmt`, combined with the existing `fnOut` rename |
+| `worker` | `lib/worker.nf:34–35` | `module` in the path, `mcp` in `mode:` (QC) | path closure; per-mode `publishDir` |
+| `s3seg` | `modules/segmentation.nf:5–6` | `pubDir`, `tag` in the path | path closure |
+| `s3seg` | `modules/segmentation.nf:9–11` | `tag` in the path, `mcp` in `mode:` (QC) | path closure; per-mode `publishDir` |
+| `autominerva` | `modules/viz.nf:5` | `tag` in `pattern:` | `saveAs` glob filter |
+| `runTask` | `roadie.nf:49` | `specs` in the path, `mode:` and `enabled:` | see below |
+
+- [ ] **Path:** use the `path:` named argument with a closure. Do not use a
+      closure as the positional argument: it publishes nothing.
+- [ ] **QC `mode:`** (`mcp.workflow['qc-files']`, which is one of `copy`,
+      `move`, `link` and `symlink` once `inherit` has been resolved in
+      `Opts.parseParams`): one `publishDir` per mode, each with a `saveAs` that
+      returns `null` unless `mcp.workflow['qc-files']` is that mode, and keeps
+      the existing rename otherwise. This applies to `worker`, `s3seg` and
+      `coreograph`. A small helper in `lib/mcmicro/Flow.groovy` for the
+      `saveAs` logic would keep the four copies short.
+- [ ] **Dynamic `pattern:`:** drop `pattern:` and filter in `saveAs` with
+      `java.nio.file.FileSystems.getDefault().getPathMatcher("glob:" + ...)`
+      on the relative file name. Check against the `manifest.tsv` captures that
+      exactly the same files are published (the `outfmt` values include brace
+      globs such as `*.{tif,tiff}` and `*.{csv,h5ad}`).
+- [ ] **`runTask`:** there are only two callers. The roadie CLI passes
+      `pub = true`, `pubMode = 'move'`, and `segmentation.nf` passes
+      `pub = false`, `pubDir = ''`, `pubMode = ''`. Under the legacy parser,
+      `enabled: "false"` disables publishing (checked), so the recyze output
+      is not published today. Use
+      `publishDir path: { specs.pubDir }, mode: 'move', saveAs: { fn -> specs.pub ? fn : null }`,
+      and either drop the now unused `pubMode` argument from the `roadie`
+      workflow or reject any value other than `'move'`.
+- [ ] Note the rule in the module template (`modules/template.nf`): never
+      refer to process inputs in `publishDir` outside a closure.
+
+**`workflow.onComplete`** needs no change under the strict parser
+(finding 7). Because a failing handler only logs an error and the run still
+exits with 0, keep checking in every strict run that `qc/params.yml` and
+`qc/metadata.yml` exist.
 
 Things to watch:
 
@@ -552,24 +647,32 @@ Things to watch:
   has no `when:`. Its existing gating via `branch` is unaffected.
 - `--start-at` / `--stop-at` combinations depend entirely on this gating. The
   partial-run steps in `ci.yml` (job `ex001-by-step`) are the main regression test.
+- The error for a missing precomputed intermediate (`findFiles` `ifEmpty`
+  handlers in `main.nf`) must still fire when a step that would have produced
+  it is gated off (N-noreg).
 
 **Testing.** This is the first phase in which the strict candidate runs the
 pipeline. Leave explicit `false` values off the command line (finding 4), and
 expect the String/Boolean differences in `params.yml` described in
 *Comparing*. The key capture here is `tasks.txt`: each step must run or be
-skipped exactly as in the baseline.
+skipped exactly as in the baseline. Under the strict parser, also check the
+`onComplete` outputs as described above.
 
 | Case | Gating checked |
 |---|---|
-| E1-default | registration, segmentation (`worker`), watershed, quantification on; illumination, background, dearray, viz, staging off |
+| E1-default | registration, segmentation (`worker`), watershed, quantification on; illumination, background, dearray, viz, staging off. `publishDir` fixes in `worker` and `s3seg`: `manifest.tsv` must match, including `qc/` |
 | AF-backsub | background on |
+| AF-bs-pre | background requested but before `--start-at`: `backsub` off, precomputed `background/` used |
 | E1-steps | each `--start-at` / `--stop-at` window |
-| E1-illum | illumination on, everything after registration off |
+| E1-illum | illumination on, everything after registration off; `publishDir` path closure in `illumination` |
 | E1-seg-multi | `worker` and s3seg with mixed watershed settings |
-| E1-downstream | `worker` with step `'downstream'` |
-| E1-viz | viz on |
-| E2-dearray | dearray on |
-| R-cli | `showHelp` gating in the roadie CLI |
+| E1-recyze | the `roadie` path from `segmentation.nf`; `runTask` must still publish nothing |
+| E1-downstream | `worker` with step `'downstream'`; the `saveAs` glob filter with `*.{csv,h5ad}` |
+| E1-viz | viz on; the `saveAs` glob filter in `autominerva` |
+| E2-dearray | dearray on; the per-mode QC `publishDir` in `coreograph` |
+| T-priority P1 | `qc-files: symlink` from the project's `params.yml`: QC files from `worker` and `s3seg` must be published as symlinks (extend P1 to `--stop-at quantification` for this check, or add a separate run) |
+| R-cli | `showHelp` gating in the roadie CLI; `--help recyze` under the strict parser (`runTask` fix). Also run `--do recyze` once, to check that the CLI still moves the output to `--out` |
+| N-noreg | registration gated off by `--start-at`, and the missing `registration/` still fails with the same message |
 
 ### Phase 4 — Type-coerce command-line parameters
 
@@ -731,6 +834,19 @@ capture is the resolved configuration. No exemplar data is needed.
    `config/schema.yml`** (`string`, `boolean`, `auto`), applied only to
    Strings in `Opts.cleanParams` (Phase 4).
 
+## Future work
+
+Problems found during the migration that are out of its scope (see *Goal and
+constraints*). Each needs a separate fix.
+
+- **`roadie.nf --list-tasks` prints the general help instead of the task
+  list.** This happens on every runtime, including the pre-migration baseline.
+  Nextflow stores `--list-tasks` only as `listTasks` (checked on 26.10.2 under
+  both parsers and on 25.04.7), so `params.containsKey('list-tasks')`
+  (`roadie.nf:102`, `roadie.nf:112`) is always false. Phase 1's R-cli case
+  matched only because the baseline and the candidates printed the same help.
+  Once this is fixed, R-cli should check for the task list explicitly.
+
 ## Progress
 
 - **Phase 0:** CI pins Nextflow; the `ex001` job runs a 25.04.7 legacy /
@@ -772,8 +888,10 @@ capture is the resolved configuration. No exemplar data is needed.
     value is kept. It now sets `symlink`. T-priority was rerun: the baseline and
     both candidates match the updated table (values and types).
   - Run the candidate runtimes one after the other: running both in parallel
-    can exhaust the memory of a 16 GB machine.
-- **Found for Phase 3:** under the strict parser (26.10.2),
-  `nextflow run roadie.nf --list-tasks` and `--help recyze` fail with
-  `No such variable: specs` (`roadie.nf:49`), with or without the Phase 2
-  changes.
+    can exhaust the memory of a 16 GB machine (now in *Runtimes*).
+  - Found for Phase 3: under the strict parser, `roadie.nf` fails with
+    `No such variable: specs`. Root cause and the complete list of affected
+    directives: finding 6. `workflow.onComplete` under the strict parser:
+    finding 7.
+  - Pre-existing problem found while checking R-cli: `roadie.nf --list-tasks`
+    does not list tasks. Out of scope; see *Future work*.
